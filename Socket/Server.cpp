@@ -36,7 +36,6 @@ int main() {
         */
     fd_set rfds;  //用于检查socket是否有数据到来的的文件描述符，用于socket非阻塞模式下等待网络事件通知（有数据到来）
     fd_set wfds;  //用于检查socket是否可以发送的文件描述符，用于socket非阻塞模式下等待网络事件通知（可以发送数据）
-    //bool first_connetion = true;
 
     //监听地址
     std::string listenAddress;
@@ -45,30 +44,76 @@ int main() {
     //主目录
     std::string rootDirectory;
 
+    std::cout << "Begin loading config..." << endl;
     //加载配置文件
     std::ifstream file("config.txt");
     std::string line;
     // 逐行读取配置文件
     while (std::getline(file, line)) {
+        // 去除每行字符串前后的空白字符
+        size_t first = line.find_first_not_of(" \t");
+        size_t last = line.find_last_not_of(" \t");
+        line = (first == std::string::npos || last == std::string::npos) ? "" : line.substr(first, last - first + 1);
+
+        // 跳过空行和以 # 开头的注释行
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
         std::istringstream is_line(line);
         std::string key;
 
-        // 解析配置项
+        // 解析键值对
         if (std::getline(is_line, key, '=')) {
             std::string value;
             if (std::getline(is_line, value)) {
+                // 去除键和值前后的空白字符
+                first = key.find_first_not_of(" \t");
+                last = key.find_last_not_of(" \t");
+                key = (first == std::string::npos || last == std::string::npos) ? "" : key.substr(first, last - first + 1);
+
+                first = value.find_first_not_of(" \t");
+                last = value.find_last_not_of(" \t");
+                value = (first == std::string::npos || last == std::string::npos) ? "" : value.substr(first, last - first + 1);
+
                 if (key == "ListenAddress") {
                     listenAddress = value;
                 }
                 else if (key == "ListenPort") {
-                    listenPort = std::stoi(value);
+                    // 检查 value 是否为有效的数字
+                    bool isNumber = true;
+                    for (char c : value) {
+                        if (!std::isdigit(c)) {
+                            isNumber = false;
+                            break;
+                        }
+                    }
+                    if (isNumber) {
+                        listenPort = std::stoi(value);
+                    }
+                    else {
+                        std::cerr << "Invalid value for ListenPort, must be a number." << endl;
+                        WSACleanup();
+                        exit(1);
+                    }
                 }
                 else if (key == "RootDirectory") {
                     rootDirectory = value;
                 }
+                else {
+                    std::cerr << "Unknown key: " << key << endl;
+                    WSACleanup();
+                    exit(1);
+                }
             }
         }
     }
+
+    // 输出读取的配置
+    std::cout << "Config load OK!" << endl;
+    std::cout << "ListenAddress: " << listenAddress << endl;
+    std::cout << "ListenPort: " << listenPort << endl;
+    std::cout << "RootDirectory: " << rootDirectory << endl;
 
     //创建监听socket
     SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -79,8 +124,6 @@ int main() {
         exit(1);
     }
     cout << "Socket create Ok!" << endl;
-
-
 
     //设置服务器的端口和地址
     struct sockaddr_in serverAddr;
@@ -117,7 +160,7 @@ int main() {
     u_long blockMode = 1;
 
     //调用ioctlsocket,将serverSocket改为非阻塞模式，改成反复检查fd_set元素的状态，看每个元素对应的句柄是否可读可写
-    if ((rtn = ioctlsocket(serverSocket, FIONBIO, &blockMode) == SOCKET_ERROR))
+    if (rtn = ioctlsocket(serverSocket, FIONBIO, &blockMode) == SOCKET_ERROR)
     {
         std::cout << "ioctlsocket() failed with error!" << endl;
         closesocket(serverSocket);
@@ -126,7 +169,11 @@ int main() {
     }
     std::cout << "ioctlsocket() for server socket OK! waiting for client connection" << endl;
 
+    //无限循环，接受客户端请求
+    while (true)
+    {
 
+    }
 
     // 清理 Winsock
     WSACleanup();
