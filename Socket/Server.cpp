@@ -1,41 +1,404 @@
-ï»¿#include <iostream>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
 #include <winsock2.h>
 
 using namespace std;
 
-//ç›‘å¬åœ°å€
-std::string listenAddress;
-//ç›‘å¬ç«¯å£
-int listenPort{};
-//å¥—æ¥å­—
-int serverSocket;
-//ä¸»ç›®å½•
-std::string rootDirectory;
+//#pragma comment(lib, "ws2_32.lib")
 
 
+int main() {
+    // ³õÊ¼»¯ Winsock
+    WSADATA wsaData;
+    int nRc = WSAStartup(WINSOCK_VERSION, &wsaData);
 
-void loadConfig(const string& configFile)
-{
-
-}
-
-
-
-int main()
-{
-    serverSocket = socket(AF_INET, SOCK_STREAM, 0);
-
-    loadConfig("config.txt");
-
-    if (serverSocket < 0)
-    {
-        std::cerr << "Error creating socket" << std::endl;
+    if (nRc != 0) {
+        std::cout << "Winsock  startup failed with error!" << endl;
+        WSACleanup();
         exit(1);
     }
 
+    if (wsaData.wVersion != WINSOCK_VERSION) {
+        std::cout << "Winsock version is not correct!" << endl;
+        WSACleanup();
+        exit(1);
+    }
+
+    std::cout << "Winsock  startup Ok!" << endl;
+
+    /*
+            select()»úÖÆÖĞÌá¹©µÄfd_setµÄÊı¾İ½á¹¹£¬Êµ¼ÊÉÏÊÇlongÀàĞÍµÄÊı×é£¬
+            Ã¿Ò»¸öÊı×éÔªËØ¶¼ÄÜÓëÒ»´ò¿ªµÄÎÄ¼ş¾ä±ú£¨²»¹ÜÊÇsocket¾ä±ú£¬»¹ÊÇÆäËûÎÄ¼ş»òÃüÃû¹ÜµÀ»òÉè±¸¾ä±ú£©½¨Á¢ÁªÏµ£¬½¨Á¢ÁªÏµµÄ¹¤×÷ÓÉ³ÌĞòÔ±Íê³É.
+            µ±µ÷ÓÃselect()Ê±£¬ÓÉÄÚºË¸ù¾İIO×´Ì¬ĞŞ¸Äfd_setµÄÄÚÈİ£¬ÓÉ´ËÀ´Í¨ÖªÖ´ĞĞÁËselect()µÄ½ø³ÌÄÄ¸ösocket»òÎÄ¼ş¾ä±ú·¢ÉúÁË¿É¶Á»ò¿ÉĞ´ÊÂ¼ş¡£
+        */
+    fd_set rfds;  //ÓÃÓÚ¼ì²ésocketÊÇ·ñÓĞÊı¾İµ½À´µÄµÄÎÄ¼şÃèÊö·û£¬ÓÃÓÚsocket·Ç×èÈûÄ£Ê½ÏÂµÈ´ıÍøÂçÊÂ¼şÍ¨Öª£¨ÓĞÊı¾İµ½À´£©
+    fd_set wfds;  //ÓÃÓÚ¼ì²ésocketÊÇ·ñ¿ÉÒÔ·¢ËÍµÄÎÄ¼şÃèÊö·û£¬ÓÃÓÚsocket·Ç×èÈûÄ£Ê½ÏÂµÈ´ıÍøÂçÊÂ¼şÍ¨Öª£¨¿ÉÒÔ·¢ËÍÊı¾İ£©
+    //bool first_connetion = true;
+
+    //¼àÌıµØÖ·
+    std::string listenAddress;
+    //¼àÌı¶Ë¿Ú
+    int listenPort{};
+    //Ö÷Ä¿Â¼
+    std::string rootDirectory;
+
+    //¼ÓÔØÅäÖÃÎÄ¼ş
+    std::ifstream file("config.txt");
+    std::string line;
+    // ÖğĞĞ¶ÁÈ¡ÅäÖÃÎÄ¼ş
+    while (std::getline(file, line)) {
+        std::istringstream is_line(line);
+        std::string key;
+
+        // ½âÎöÅäÖÃÏî
+        if (std::getline(is_line, key, '=')) {
+            std::string value;
+            if (std::getline(is_line, value)) {
+                if (key == "ListenAddress") {
+                    listenAddress = value;
+                }
+                else if (key == "ListenPort") {
+                    listenPort = std::stoi(value);
+                }
+                else if (key == "RootDirectory") {
+                    rootDirectory = value;
+                }
+            }
+        }
+    }
+
+    //´´½¨¼àÌısocket
+    SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (serverSocket == INVALID_SOCKET) {
+        std::cerr << "Error creating socket" << std::endl;
+        WSACleanup();
+        exit(1);
+    }
+    cout << "Socket create Ok!" << endl;
+
+
+
+    //ÉèÖÃ·şÎñÆ÷µÄ¶Ë¿ÚºÍµØÖ·
     struct sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = inet_addr(listenAddress.c_str());
+    serverAddr.sin_port = htons(listenPort);
+    serverAddr.sin_addr.S_un.S_addr = inet_addr(listenAddress.c_str());
 
+    //binding
+    int rtn = bind(serverSocket, (LPSOCKADDR)&serverAddr, sizeof(serverAddr));
+    if (rtn == SOCKET_ERROR)
+    {
+        std::cerr << "Error binding socket!" << endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        exit(1);
+    }
+    std::cout << "Socket bind OK!" << endl;
+
+    //¼àÌı
+    rtn = listen(serverSocket, 5);
+    if (rtn == SOCKET_ERROR)
+    {
+        std::cerr << "Error listening socket!" << endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        exit(1);
+    }
+    std::cout << "Socket listen OK!" << endl;
+
+    //ÉèÖÃ½ÓÊÜ»º³åÇø
+    char recvBuf[4096];
+
+    //½«serverSocketÉèÖÃÎª·Ç×èÈûÄ£Ê½ÒÔ¼àÌı¿Í»§¶ËÁ¬½ÓÇëÇó
+    u_long blockMode = 1;
+
+    //µ÷ÓÃioctlsocket,½«serverSocket¸ÄÎª·Ç×èÈûÄ£Ê½£¬¸Ä³É·´¸´¼ì²éfd_setÔªËØµÄ×´Ì¬£¬¿´Ã¿¸öÔªËØ¶ÔÓ¦µÄ¾ä±úÊÇ·ñ¿É¶Á¿ÉĞ´
+    if ((rtn = ioctlsocket(serverSocket, FIONBIO, &blockMode) == SOCKET_ERROR))
+    {
+        std::cout << "ioctlsocket() failed with error!" << endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        exit(1);
+    }
+    std::cout << "ioctlsocket() for server socket OK! waiting for client connection" << endl;
+
+
+
+    // ÇåÀí Winsock
+    WSACleanup();
 }
 
+// #include <filesystem>
+// #include <fstream>
+// #include <iostream>
+// #include <sstream>
+// #include <string>
+
+// #include <fcntl.h>
+// #include <unistd.h>
+// #include <winsock2.h>
+// #include <ws2tcpip.h>
+
+// namespace fs = std::filesystem;
+
+// std::string const serverConfigFile = "config.txt";
+
+// class WebServer {
+//  public:
+//   // ¹¹Ôìº¯Êı£¬³õÊ¼»¯Web·şÎñÆ÷²¢¼ÓÔØÅäÖÃÎÄ¼ş
+//   explicit WebServer(std::string const& configFile);
+
+//   // Æô¶¯Web·şÎñÆ÷
+//   void start();
+
+//  private:
+//   // ¼ÓÔØÅäÖÃÎÄ¼ş
+//   void loadConfig(std::string const& configFile);
+
+//   // ´¦Àí¿Í»§¶ËÇëÇó
+//   void handleRequest(int clientSocket);
+
+//   // ¶ÁÈ¡ÎÄ¼şÄÚÈİ
+//   static std::string readFile(std::string const& filePath);
+
+//   // ¹¹½¨HTTPÏìÓ¦±¨ÎÄ
+//   static std::string buildResponse(std::string const& filePath, std::string const& fileContent);
+
+//   // »ñÈ¡ÎÄ¼şµÄMIMEÀàĞÍ
+//   static std::string getContentType(std::string const& filePath);
+
+//   // ¼ÇÂ¼ÇëÇóĞÅÏ¢
+//   static void logRequest(std::string const& ip, int port, std::string const& request);
+
+//   // ¼ÇÂ¼ÏìÓ¦ĞÅÏ¢
+//   static void logResponse(std::string const& result);
+
+//   // ¼àÌıµØÖ·
+//   std::string listenAddress;
+
+//   // ¼àÌı¶Ë¿Ú
+//   int listenPort{};
+
+//   // Ö÷Ä¿Â¼
+//   std::string rootDirectory;
+
+//   // ·şÎñÆ÷Ì×½Ó×Ö
+//   int serverSocket;
+// };
+
+// // ¹¹Ôìº¯ÊıÊµÏÖ
+// WebServer::WebServer(std::string const& configFile) : serverSocket(socket(AF_INET, SOCK_STREAM, 0)) {
+//   // ¼ÓÔØÅäÖÃÎÄ¼ş
+//   loadConfig(configFile);
+
+//   // ´´½¨·şÎñÆ÷Ì×½Ó×Ö
+//   if (serverSocket < 0) {
+//     std::cerr << "Error creating socket" << std::endl;
+//     exit(1);
+//   }
+
+//   // ÉèÖÃ·şÎñÆ÷µØÖ·½á¹¹
+//   struct sockaddr_in serverAddr;
+//   serverAddr.sin_family      = AF_INET;
+//   serverAddr.sin_addr.s_addr = inet_addr(listenAddress.c_str());
+//   serverAddr.sin_port        = htons(listenPort);
+
+//   // °ó¶¨Ì×½Ó×Ö
+//   if (bind(serverSocket, reinterpret_cast<struct sockaddr*>(&serverAddr), sizeof(serverAddr)) < 0) {
+//     std::cerr << "Error binding socket" << std::endl;
+//     exit(1);
+//   }
+
+//   // ¼àÌıÌ×½Ó×Ö
+//   if (listen(serverSocket, 5) < 0) {
+//     std::cerr << "Error listening on socket" << std::endl;
+//     exit(1);
+//   }
+// }
+
+// // Æô¶¯·şÎñÆ÷
+// void WebServer::start() {
+//   std::cout << "Server started on " << listenAddress << ":" << listenPort << std::endl;
+
+//   // ÎŞÏŞÑ­»·£¬µÈ´ı¿Í»§¶ËÁ¬½Ó
+//   while (true) {
+//     struct sockaddr_in clientAddr;
+//     socklen_t clientAddrLen = sizeof(clientAddr);
+
+//     // ½ÓÊÜ¿Í»§¶ËÁ¬½Ó
+//     int clientSocket = accept(serverSocket, reinterpret_cast<struct sockaddr*>(&clientAddr), &clientAddrLen);
+//     if (clientSocket < 0) {
+//       std::cerr << "Error accepting connection" << std::endl;
+//       continue;
+//     }
+
+//     // ´¦Àí¿Í»§¶ËÇëÇó
+//     handleRequest(clientSocket);
+
+//     // ¹Ø±Õ¿Í»§¶ËÌ×½Ó×Ö
+//     close(clientSocket);
+//   }
+// }
+
+// // ¼ÓÔØÅäÖÃÎÄ¼ş
+// void WebServer::loadConfig(std::string const& configFile) {
+//   std::ifstream file(configFile);
+//   std::string line;
+
+//   // ÖğĞĞ¶ÁÈ¡ÅäÖÃÎÄ¼ş
+//   while (std::getline(file, line)) {
+//     std::istringstream is_line(line);
+//     std::string key;
+
+//     // ½âÎöÅäÖÃÏî
+//     if (std::getline(is_line, key, '=')) {
+//       std::string value;
+//       if (std::getline(is_line, value)) {
+//         if (key == "ListenAddress") {
+//           listenAddress = value;
+//         } else if (key == "ListenPort") {
+//           listenPort = std::stoi(value);
+//         } else if (key == "RootDirectory") {
+//           rootDirectory = value;
+//         }
+//       }
+//     }
+//   }
+// }
+
+// // ´¦Àí¿Í»§¶ËÇëÇó
+// void WebServer::handleRequest(int clientSocket) {
+//   char buffer[1024];
+
+//   // ½ÓÊÕ¿Í»§¶ËÇëÇó
+//   ssize_t bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+//   if (bytesRead < 0) {
+//     std::cerr << "Error reading from socket" << std::endl;
+//     return;
+//   }
+//   buffer[bytesRead] = '\0';
+
+//   // ½âÎöÇëÇó±¨ÎÄ
+//   std::string request(buffer);
+//   std::stringstream requestStream(request);
+//   std::string requestLine;
+//   std::getline(requestStream, requestLine);
+
+//   std::string method;
+//   std::string path;
+//   std::string protocol;
+//   std::istringstream(requestLine) >> method >> path >> protocol;
+
+//   // ¹¹½¨ÎÄ¼şÂ·¾¶
+//   std::string filePath = rootDirectory + path;
+//   if (filePath.back() == '/') {
+//     filePath += "index.html";
+//   }
+
+//   // ¶ÁÈ¡ÎÄ¼şÄÚÈİ
+//   std::string fileContent = readFile(filePath);
+
+//   // ¹¹½¨ÏìÓ¦±¨ÎÄ
+//   std::string response = buildResponse(filePath, fileContent);
+
+//   // ·¢ËÍÏìÓ¦±¨ÎÄ
+//   send(clientSocket, response.c_str(), response.size(), 0);
+
+//   // ¼ÇÂ¼ÇëÇóĞÅÏ¢
+//   logRequest(inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port), requestLine);
+
+//   // ¼ÇÂ¼ÏìÓ¦ĞÅÏ¢
+//   logResponse(fileContent.empty() ? "File not found" : "File served");
+// }
+
+// // ¶ÁÈ¡ÎÄ¼şÄÚÈİ
+// std::string WebServer::readFile(std::string const& filePath) {
+//   std::ifstream file(filePath, std::ios::binary);
+
+//   // Èç¹ûÎÄ¼ş²»´æÔÚ£¬·µ»Ø¿Õ×Ö·û´®
+//   if (!file) {
+//     return "";
+//   }
+
+//   std::stringstream buffer;
+//   buffer << file.rdbuf();
+//   return buffer.str();
+// }
+
+// // ¹¹½¨HTTPÏìÓ¦±¨ÎÄ
+// std::string WebServer::buildResponse(std::string const& filePath, std::string const& fileContent) {
+//   std::string response;
+
+//   // Èç¹ûÎÄ¼şÄÚÈİÎª¿Õ£¬·µ»Ø404´íÎó
+//   if (fileContent.empty()) {
+//     response = "HTTP/1.1 404 Not Found\r\n\r\n";
+//   } else {
+//     // ¹¹½¨200 OKÏìÓ¦
+//     response  = "HTTP/1.1 200 OK\r\n";
+//     response += "Content-Type: " + getContentType(filePath) + "\r\n";
+//     response += "Content-Length: " + std::to_string(fileContent.size()) + "\r\n";
+//     response += "\r\n";
+//     response += fileContent;
+//   }
+//   return response;
+// }
+
+// // »ñÈ¡ÎÄ¼şµÄMIMEÀàĞÍ
+// std::string WebServer::getContentType(std::string const& filePath) {
+//   std::string extension = fs::path(filePath).extension().string();
+
+//   // ¸ù¾İÎÄ¼şÀ©Õ¹Ãû·µ»Ø¶ÔÓ¦µÄMIMEÀàĞÍ
+//   if (extension == ".html") {
+//     return "text/html";
+//   }
+//   if (extension == ".jpg" || extension == ".jpeg") {
+//     return "image/jpeg";
+//   }
+//   if (extension == ".png") {
+//     return "image/png";
+//   }
+//   if (extension == ".gif") {
+//     return "image/gif";
+//   }
+//   if (extension == ".css") {
+//     return "text/css";
+//   }
+//   if (extension == ".js") {
+//     return "application/javascript";
+//   }
+//   return "text/plain";
+// }
+
+// // ¼ÇÂ¼ÇëÇóĞÅÏ¢
+// void WebServer::logRequest(std::string const& ip, int port, std::string const& request) {
+//   std::cout << "Request from " << ip << ":" << port << " - " << request << std::endl;
+// }
+
+// // ¼ÇÂ¼ÏìÓ¦ĞÅÏ¢
+// void WebServer::logResponse(std::string const& result) {
+//   std::cout << "Response: " << result << std::endl;
+// }
+
+// // Ö÷º¯Êı
+// int main() {
+//   // ³õÊ¼»¯ Winsock
+//   WSADATA wsaData;
+//   int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
+//   if (result != 0) {
+//     std::cerr << "WSAStartup failed: " << result << std::endl;
+//     return 1;
+//   }
+
+//   // ´´½¨WebServerÊµÀı²¢Æô¶¯·şÎñÆ÷
+//   WebServer server(serverConfigFile);
+//   server.start();
+
+//   // ÇåÀí Winsock
+//   WSACleanup();
+
+//   return 0;
+// }
